@@ -1,5 +1,4 @@
 data "aws_partition" "current" {}
-data "aws_caller_identity" "current" {}
 
 ################################################################################
 # User Data
@@ -15,7 +14,7 @@ module "user_data" {
   cluster_endpoint     = var.cluster_endpoint
   cluster_auth_base64  = var.cluster_auth_base64
   cluster_ip_family    = var.cluster_ip_family
-  cluster_service_cidr = try(coalesce(var.cluster_service_cidr, var.cluster_service_ipv4_cidr), "")
+  cluster_service_cidr = try(var.cluster_service_cidr, "")
 
   enable_bootstrap_user_data = var.enable_bootstrap_user_data
   pre_bootstrap_user_data    = var.pre_bootstrap_user_data
@@ -478,9 +477,6 @@ locals {
   ipv4_cni_policy = { for k, v in {
     AmazonEKS_CNI_Policy = "${local.iam_role_policy_prefix}/AmazonEKS_CNI_Policy"
   } : k => v if var.iam_role_attach_cni_policy && var.cluster_ip_family == "ipv4" }
-  ipv6_cni_policy = { for k, v in {
-    AmazonEKS_CNI_IPv6_Policy = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/AmazonEKS_CNI_IPv6_Policy"
-  } : k => v if var.iam_role_attach_cni_policy && var.cluster_ip_family == "ipv6" }
 }
 
 data "aws_iam_policy_document" "assume_role_policy" {
@@ -519,8 +515,7 @@ resource "aws_iam_role_policy_attachment" "this" {
       AmazonEKSWorkerNodePolicy          = "${local.iam_role_policy_prefix}/AmazonEKSWorkerNodePolicy"
       AmazonEC2ContainerRegistryReadOnly = "${local.iam_role_policy_prefix}/AmazonEC2ContainerRegistryReadOnly"
     },
-    local.ipv4_cni_policy,
-    local.ipv6_cni_policy
+    local.ipv4_cni_policy
   ) : k => v if local.create_iam_role }
 
   policy_arn = each.value

@@ -24,9 +24,15 @@ resource "aws_eks_cluster" "cluster" {
     endpoint_public_access  = var.cluster_endpoint_public_access
     public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
   }
+  dynamic "kubernetes_network_config" {
+    for_each = [1]
 
+    content {
+      ip_family         = var.cluster_ip_family
+      service_ipv4_cidr = var.cluster_service_ipv4_cidr
+    }
+  }
   dynamic "encryption_config" {
-    # Not available on Outposts
     for_each = local.enable_cluster_encryption_config ? [var.cluster_encryption_config] : []
 
     content {
@@ -117,7 +123,7 @@ resource "aws_eks_access_policy_association" "association" {
 
 module "kms" {
   source  = "sudo-terraform-aws-modules/sudo-kms/aws"
-  version = "1.0.0"
+  version = "1.0.1"
 
   create = local.create && var.create_kms_key && local.enable_cluster_encryption_config
 
@@ -235,10 +241,14 @@ resource "aws_iam_policy" "cluster" {
 
   tags = merge(var.tags, var.cluster_policy_tags)
 }
+resource "aws_iam_role_policy_attachment" "cluster_policy_attachment" {
+  count = local.create_iam_role ? 1 : 0
 
+  policy_arn = aws_iam_policy.cluster[0].arn
+  role       = aws_iam_role.role[0].name
+}
 resource "aws_iam_role_policy_attachment" "cluster" {
   for_each = { for k, v in {
-    AmazonEKSClusterPolicy         = aws_iam_policy.cluster[0].arn,
     AmazonEKSVPCResourceController = "${local.iam_role_policy_prefix}/AmazonEKSVPCResourceController",
   } : k => v if local.create_iam_role }
 
@@ -255,7 +265,6 @@ resource "aws_iam_role_policy_attachment" "additional" {
 
 # Using separate attachment due to `The "for_each" value depends on resource attributes that cannot be determined until apply`
 resource "aws_iam_role_policy_attachment" "cluster_encryption" {
-  # Encryption config not available on Outposts
   count = local.create_iam_role && var.attach_cluster_encryption_policy && local.enable_cluster_encryption_config ? 1 : 0
 
   policy_arn = aws_iam_policy.cluster_encryption[0].arn
@@ -263,7 +272,6 @@ resource "aws_iam_role_policy_attachment" "cluster_encryption" {
 }
 
 resource "aws_iam_policy" "cluster_encryption" {
-  # Encryption config not available on Outposts
   count = local.create_iam_role && var.attach_cluster_encryption_policy && local.enable_cluster_encryption_config ? 1 : 0
 
   name        = var.cluster_encryption_policy_use_name_prefix ? null : local.cluster_encryption_policy_name
@@ -548,7 +556,6 @@ module "eks_managed_node_group" {
   platform                   = try(each.value.platform, var.eks_managed_node_group_defaults.platform, "linux")
   cluster_endpoint           = try(time_sleep.sleep[0].triggers["cluster_endpoint"], "")
   cluster_auth_base64        = try(time_sleep.sleep[0].triggers["cluster_certificate_authority_data"], "")
-  cluster_service_ipv4_cidr  = var.cluster_service_ipv4_cidr
   cluster_ip_family          = var.cluster_ip_family
   cluster_service_cidr       = try(time_sleep.sleep[0].triggers["cluster_service_cidr"], "")
   enable_bootstrap_user_data = try(each.value.enable_bootstrap_user_data, var.eks_managed_node_group_defaults.enable_bootstrap_user_data, false)
